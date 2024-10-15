@@ -33,7 +33,7 @@ This project provides a GUI interface for interacting with the `ollama` terminal
 1. **Run the script**:
    To start the GUI, simply run the Python script:
    ```bash
-   python ollama_gui.py
+   python llama.py
    ```
 
 2. **Select a Model**:

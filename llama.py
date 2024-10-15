@@ -1,6 +1,6 @@
 import subprocess
 import tkinter as tk
-from tkinter import scrolledtext, messagebox
+from tkinter import scrolledtext, messagebox, ttk
 import re
 import threading
 import time
@@ -51,12 +51,12 @@ def send_prompt():
     prompt = prompt_entry.get()
     if not prompt:
         return
-    model = model_entry.get()
+    model = model_var.get()
     if not model:
-        messagebox.showwarning("Warning", "Please enter a model name.")
+        messagebox.showwarning("Warning", "Please select a model.")
         return
     chat_history.configure(state='normal')
-    chat_history.insert(tk.END, f"You: {prompt}\n")
+    chat_history.insert(tk.END, f"You: {prompt}\n", "user")
     chat_history.configure(state='disabled')
     prompt_entry.delete(0, tk.END)
     
@@ -66,24 +66,139 @@ def send_prompt():
 def handle_response(model, prompt):
     response = ollama(model, prompt)
     if response:
-        # Display Ollama's response with typing effect
+        # Display Ollama's response with typing effect and Markdown rendering
         type_text(f"Ollama: {response}\n")
 
 def type_text(text, delay=0.02):
     """
-    Display text in the chat history with a typing effect.
+    Display text in the chat history with a typing effect and Markdown rendering.
 
     Parameters:
     - text: The text to display.
     - delay: Delay between each character (in seconds).
     """
-    chat_history.configure(state='normal')
-    for char in text:
-        chat_history.insert(tk.END, char)
-        chat_history.see(tk.END)
-        chat_history.update_idletasks()
-        time.sleep(delay)
-    chat_history.configure(state='disabled')
+    # Split the text into lines to handle Markdown per line
+    lines = text.split('\n')
+    for line in lines:
+        formatted_line = parse_markdown(line)
+        chat_history.configure(state='normal')
+        for segment, tag in formatted_line:
+            if tag:
+                chat_history.insert(tk.END, segment, tag)
+            else:
+                chat_history.insert(tk.END, segment)
+            chat_history.see(tk.END)
+            chat_history.update_idletasks()
+            time.sleep(delay * len(segment))  # Adjust delay based on segment length
+        chat_history.insert(tk.END, '\n')
+        chat_history.configure(state='disabled')
+
+def parse_markdown(text):
+    """
+    Parse a line of text for basic Markdown syntax and return segments with corresponding tags.
+
+    Supports:
+    - Bold (**text** or __text__)
+    - Italic (*text* or _text_)
+    - Inline Code (`text`)
+    - Links [text](url)
+
+    Parameters:
+    - text: The text line to parse.
+
+    Returns:
+    - A list of tuples containing (text_segment, tag_name).
+    """
+    patterns = [
+        (r'\*\*(.*?)\*\*', 'bold'),
+        (r'__(.*?)__', 'bold'),
+        (r'\*(.*?)\*', 'italic'),
+        (r'_(.*?)_', 'italic'),
+        (r'`(.*?)`', 'code'),
+        (r'\[(.*?)\]\((.*?)\)', 'link')
+    ]
+
+    segments = []
+    current_index = 0
+    while current_index < len(text):
+        match = None
+        for pattern, tag in patterns:
+            regex = re.compile(pattern)
+            match = regex.search(text, current_index)
+            if match and match.start() == current_index:
+                if tag == 'link':
+                    segments.append((match.group(1), tag, match.group(2)))
+                else:
+                    segments.append((match.group(1), tag))
+                current_index = match.end()
+                break
+        if not match:
+            # No more patterns matched; append the rest of the text
+            segments.append((text[current_index:], None))
+            break
+    return segments
+
+def apply_tags():
+    """
+    Define text tags for Markdown formatting in the chat history.
+    """
+    # Bold text
+    chat_history.tag_configure("bold", font=("TkDefaultFont", 10, "bold"))
+    # Italic text
+    chat_history.tag_configure("italic", font=("TkDefaultFont", 10, "italic"))
+    # Code text
+    chat_history.tag_configure("code", font=("TkDefaultFont", 10, "bold"), foreground="blue")
+    # Link text
+    chat_history.tag_configure("link", foreground="blue", underline=1)
+    # Bind click event for links
+    chat_history.tag_bind("link", "<Button-1>", open_link)
+
+def open_link(event):
+    """
+    Handle click events on links to open them in the default web browser.
+    """
+    index = chat_history.index("@%s,%s" % (event.x, event.y))
+    tags = chat_history.tag_names(index)
+    if "link" in tags:
+        # Get the entire line containing the link
+        line_start = f"{index.split('.')[0]}.0"
+        line_end = f"{index.split('.')[0]}.end"
+        line_text = chat_history.get(line_start, line_end)
+        # Extract the URL from the link tag
+        url_match = re.search(r'\[(.*?)\]\((.*?)\)', line_text)
+        if url_match:
+            import webbrowser
+            webbrowser.open(url_match.group(2))
+
+# Modify the type_text function to handle markdown tags
+def type_text(text, delay=0.02):
+    """
+    Display text in the chat history with a typing effect and Markdown rendering.
+
+    Parameters:
+    - text: The text to display.
+    - delay: Delay between each character (in seconds).
+    """
+    # Split the text into lines to handle Markdown per line
+    lines = text.split('\n')
+    for line in lines:
+        segments = parse_markdown(line)
+        chat_history.configure(state='normal')
+        for segment in segments:
+            if len(segment) == 3 and segment[1] == 'link':
+                # Link with text and URL
+                chat_history.insert(tk.END, segment[0], ("link",))
+                # Store the URL as a tag attribute
+                chat_history.tag_add("link", f"end-{len(segment[0])}c", "end")
+            elif len(segment) == 2 and segment[1] in ["bold", "italic", "code"]:
+                chat_history.insert(tk.END, segment[0], (segment[1],))
+            else:
+                chat_history.insert(tk.END, segment[0])
+            chat_history.see(tk.END)
+            chat_history.update_idletasks()
+            time.sleep(delay * len(segment[0]))  # Adjust delay based on segment length
+        chat_history.insert(tk.END, '\n')
+        chat_history.configure(state='disabled')
 
 def on_enter(event):
     send_prompt()
@@ -92,17 +207,34 @@ def on_enter(event):
 root = tk.Tk()
 root.title("Ollama GUI Interface")
 
-# Model frame
+# Apply tags for Markdown formatting
+# Create chat_history first to apply tags later
+# Model frame with dropdown menu
 model_frame = tk.Frame(root)
 model_frame.pack(pady=5)
-model_label = tk.Label(model_frame, text="Model Name:")
-model_label.pack(side=tk.LEFT)
-model_entry = tk.Entry(model_frame)
-model_entry.pack(side=tk.LEFT)
+model_label = tk.Label(model_frame, text="Model:")
+model_label.pack(side=tk.LEFT, padx=(0, 10))
+
+# Define available models
+available_models = [
+    "llama3.2:1b",
+    # Add more models as needed
+]
+
+# StringVar to hold the selected model
+model_var = tk.StringVar()
+model_var.set(available_models[0])  # Set default value
+
+# Create a dropdown (Combobox) for model selection
+model_dropdown = ttk.Combobox(model_frame, textvariable=model_var, values=available_models, state='readonly')
+model_dropdown.pack(side=tk.LEFT)
 
 # Chat history
 chat_history = scrolledtext.ScrolledText(root, wrap=tk.WORD, state='disabled', width=80, height=20)
 chat_history.pack(padx=10, pady=10)
+
+# Apply Markdown tags
+apply_tags()
 
 # Prompt frame
 prompt_frame = tk.Frame(root)

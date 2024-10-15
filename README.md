@@ -59,7 +59,7 @@ This project provides a GUI interface for interacting with the `ollama` terminal
 1. Select `llama3.2:1b` from the model dropdown.
 2. Enter the prompt:
    ```
-   Tell me a joke about programming.
+   Tell me a joke about meta.
    ```
 3. The response will be displayed with a typing effect in the chat history.
 
